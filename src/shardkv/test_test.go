@@ -2,10 +2,10 @@ package shardkv
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"mit/models"
 	"mit/porcupine"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -710,7 +710,7 @@ func TestUnreliable3(t *testing.T) {
 
 	res, info := porcupine.CheckOperationsVerbose(models.KvModel, operations, linearizabilityCheckTimeout)
 	if res == porcupine.Illegal {
-		file, err := ioutil.TempFile("", "*.html")
+		file, err := os.CreateTemp("", "*.html")
 		if err != nil {
 			fmt.Printf("info: failed to create temp file for visualization")
 		} else {
