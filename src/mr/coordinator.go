@@ -6,55 +6,198 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"strconv"
+	"sync"
+	"time"
 )
 
-type Coordinator struct {
-	// Your definitions here.
+const (
+	TypeMap = iota
+	TypeReduce
+	TypeSleep
+)
 
+const (
+	TaskUnexecuted = iota
+	TaskExecuting
+	TaskFinished
+)
+
+const (
+	StatusHealthy = iota
+	StatusTimeout
+)
+
+// 全局唯一的 ID 作为任务的名称
+var UniqueTaskID int = 0
+
+type Task struct {
+	ID        string // 任务名称
+	Type      int64  // 任务类型
+	Status    int64  // 任务状态: 0-正常  1-超时
+	MFileName string // 记录分配给 Map 任务的文件名称
+	RFileID   int64  // 记录分配给 Reduce 任务的文件编号
 }
 
-// Your code here -- RPC handlers for the worker to call.
+// MRecords:     map  [filename]  status
+// RRecords:     map  [ReduceID]  status
+// TaskMap:      map  [TaskID]    *Task
+// MiddleFiles:  map  [ReduceID]  []string
+type Coordinator struct {
+	Mutex       sync.Mutex
+	MRecords    map[string]int64   // map:    0-未执行 1-执行中 2-已完成
+	RRecords    map[int64]int64    // reduce: 0-未执行 1-执行中 2-已完成
+	MiddleFiles map[int64][]string // 记录中间文件
+	TaskMap     map[string]*Task   // 记录正在执行的任务
+	ReduceNum   int64              // 记录 reduce 任务的数量
+	RCount      int64              // 已完成的 reduce 任务数量
+	MIsFinished bool               // 标记所有 map 任务是否已完成
+	RIsFinished bool               // 标记所有 reduce 任务是否已完成
+}
 
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
+func (c *Coordinator) GetTask(req *GetTaskRequest, resp *GetTaskResponse) error {
+	// 多 worker 竞争
+	c.Mutex.Lock()
+	defer c.Mutex.Unlock()
+
+	// 响应数据初始化
+	resp.MFileName = ""
+	resp.RFileName = make([]string, 0)
+	resp.ReduceNum = c.ReduceNum
+	resp.TaskID = strconv.Itoa(UniqueTaskID)
+	UniqueTaskID = UniqueTaskID + 1
+
+	if c.MIsFinished {
+		// key: ID
+		for key, status := range c.RRecords {
+			if status == TaskExecuting || status == TaskFinished {
+				continue
+			}
+			c.RRecords[key] = TaskExecuting
+			resp.RFileName = append(resp.RFileName, c.MiddleFiles[key]...)
+			resp.TaskType = TypeReduce
+
+			task := &Task{
+				ID:        resp.TaskID,
+				Type:      resp.TaskType,
+				Status:    StatusHealthy,
+				MFileName: "",
+				RFileID:   key,
+			}
+
+			c.TaskMap[resp.TaskID] = task
+			go c.HandleTimeout(resp.TaskID)
+			return nil
+		}
+
+		resp.TaskType = TypeSleep
+	} else {
+		// key: Filename
+		for key, status := range c.MRecords {
+			if status == TaskExecuting || status == TaskFinished {
+				continue
+			}
+			c.MRecords[key] = TaskExecuting
+			resp.MFileName = key
+			resp.TaskType = TypeMap
+
+			task := &Task{
+				ID:        resp.TaskID,
+				Type:      resp.TaskType,
+				Status:    StatusHealthy,
+				MFileName: resp.MFileName,
+				RFileID:   -1,
+			}
+
+			c.TaskMap[resp.TaskID] = task
+			go c.HandleTimeout(resp.TaskID)
+			return nil
+		}
+
+		// worker 未分配到任务
+		resp.TaskType = TypeSleep
+	}
 	return nil
 }
 
-// start a thread that listens for RPCs from worker.go
+func (c *Coordinator) HandleTimeout(TaskID string) {
+	// 给 10s 处理时间
+	time.Sleep(time.Second * 10)
+	c.Mutex.Lock()
+	defer c.Mutex.Unlock()
+
+	// 10s 后还在执行说明任务超时, 重置任务状态
+	if task, ok := c.TaskMap[TaskID]; ok {
+		task.Status = StatusTimeout
+
+		if task.Type == TypeMap {
+			Filename := task.MFileName
+			if c.MRecords[Filename] == TaskExecuting {
+				c.MRecords[Filename] = TaskUnexecuted
+			}
+		} else if task.Type == TypeReduce {
+			FileID := task.RFileID
+			if c.RRecords[FileID] == TaskExecuting {
+				c.RRecords[FileID] = TaskUnexecuted
+			}
+		}
+	}
+}
+
+func (c *Coordinator) Report(req *ReportRequest, resp *ReportResponse) error {
+	return nil
+}
+
+// 注册 Coordinator, 将 RPC 消息处理器绑定到 HTTP 路由
+// 使用 Unix 域套接字: 仅允许本地进程通信 (无需暴露网络端口)
+// 持续接受连接并处理 RPC or HTTP 请求
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
-	//l, e := net.Listen("tcp", ":1234")
 	sockname := coordinatorSock()
 	os.Remove(sockname)
-	l, e := net.Listen("unix", sockname)
-	if e != nil {
-		log.Fatal("listen error:", e)
+	listener, err := net.Listen("unix", sockname)
+	if err != nil {
+		log.Fatal("listen error:", err)
 	}
-	go http.Serve(l, nil)
+
+	go http.Serve(listener, nil)
 }
 
-// main/mrcoordinator.go calls Done() periodically to find out
-// if the entire job has finished.
+// Done 用于检查整个任务是否已经完成
 func (c *Coordinator) Done() bool {
 	ret := false
-
-	// Your code here.
-
+	c.Mutex.Lock()
+	defer c.Mutex.Unlock()
+	if c.RCount == c.ReduceNum {
+		ret = true
+	}
 	return ret
 }
 
-// create a Coordinator.
-// main/mrcoordinator.go calls this function.
-// nReduce is the number of reduce tasks to use.
-func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
+// Coordinator 初始化
+func MakeCoordinator(files []string, nReduce int64) *Coordinator {
+	c := Coordinator{
+		Mutex:       sync.Mutex{},
+		MRecords:    make(map[string]int64),
+		RRecords:    make(map[int64]int64),
+		MiddleFiles: make(map[int64][]string),
+		TaskMap:     make(map[string]*Task),
+		ReduceNum:   nReduce,
+		RCount:      0,
+		MIsFinished: false,
+		RIsFinished: false,
+	}
 
-	// Your code here.
+	for _, file := range files {
+		c.MRecords[file] = 0
+	}
+	var ReduceID int64 = 0
+	for ; ReduceID < nReduce; ReduceID++ {
+		c.RRecords[ReduceID] = 0
+	}
 
+	// MiddleFiles 的数据在 map 任务执行后产生, 目前为空
 	c.server()
 	return &c
 }

@@ -7,75 +7,47 @@ import (
 	"net/rpc"
 )
 
-// Map functions return a slice of KeyValue.
 type KeyValue struct {
 	Key   string
-	Value string
+	Value string // string 便于测试
 }
 
-// use ihash(key) % NReduce to choose the reduce
-// task number for each KeyValue emitted by Map.
-func ihash(key string) int {
+// 使用 ihash(key) % NReduce 来为每个由 Map 阶段输出的 KeyValue 选择对应的 Reduce 任务编号
+func Ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
-
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the coordinator.
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 	// CallExample()
-
 }
 
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
+func CallGetTask() {
+	args := GetTaskRequest{GetNull: 1}
+	reply := GetTaskResponse{}
 
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
+	ok := call("Coordinator.GetTask", &args, &reply)
 	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
+		fmt.Printf("reply %+v\n", reply)
 	} else {
-		fmt.Printf("call failed!\n")
+		fmt.Printf("call failed\n")
 	}
 }
 
-// send an RPC request to the coordinator, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
-func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
+// call: 向 Coordinator 发送请求
+func call(rpcname string, args any, reply any) bool {
 	sockname := coordinatorSock()
-	c, err := rpc.DialHTTP("unix", sockname)
+	client, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		log.Fatal("dialing failed:", err)
 	}
-	defer c.Close()
+	defer client.Close()
 
-	err = c.Call(rpcname, args, reply)
-	if err == nil {
-		return true
+	err = client.Call(rpcname, args, reply)
+	if err != nil {
+		fmt.Println(err)
+		return false
 	}
-
-	fmt.Println(err)
-	return false
+	return true
 }
