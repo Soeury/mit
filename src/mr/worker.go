@@ -5,11 +5,12 @@ import (
 	"hash/fnv"
 	"log"
 	"net/rpc"
+	"time"
 )
 
 type KeyValue struct {
 	Key   string
-	Value string // string 便于测试
+	Value string
 }
 
 // 使用 ihash(key) % NReduce 来为每个由 Map 阶段输出的 KeyValue 选择对应的 Reduce 任务编号
@@ -19,17 +20,50 @@ func Ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
-	// CallExample()
+func HandleMap(mapf func(string, string) []KeyValue, fileName string, reduceNum int64, taskID string) []string {
+	return nil
 }
 
-func CallGetTask() {
-	args := GetTaskRequest{GetNull: 1}
-	reply := GetTaskResponse{}
+func HandleReduce(reducef func(string, []string) string, filenames []string) string {
+	return ""
+}
 
-	ok := call("Coordinator.GetTask", &args, &reply)
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
+	for {
+		resp := GetTaskResponse{}
+		CallGetTask(resp)
+
+		if resp.TaskType == TypeMap {
+			middleFiles := HandleMap(mapf, resp.MFileName, resp.ReduceNum, resp.TaskID)
+			reportReq := ReportRequest{}
+			reportReq.MiddleFileNames = middleFiles
+			reportReq.TaskID = resp.TaskID
+			CallReport(reportReq)
+		} else if resp.TaskType == TypeReduce {
+			// 任务类型为 reduce 类型
+		} else if resp.TaskType == TypeSleep {
+			time.Sleep(DefaultTimeDuration)
+		} else {
+			log.Fatal("get task is invalid type")
+		}
+	}
+}
+
+func CallGetTask(resp GetTaskResponse) {
+	req := GetTaskRequest{GetNull: DefaultGetNull}
+	ok := call("Coordinator.GetTask", &req, &resp)
 	if ok {
-		fmt.Printf("reply %+v\n", reply)
+		fmt.Printf("reply %+v\n", resp)
+	} else {
+		fmt.Printf("call failed\n")
+	}
+}
+
+func CallReport(req ReportRequest) {
+	resp := ReportResponse{ReportNull: DefaultReportNull}
+	ok := call("Coordinator.Report", &req, &resp)
+	if ok {
+		fmt.Printf("reply %+v\n", resp)
 	} else {
 		fmt.Printf("call failed\n")
 	}

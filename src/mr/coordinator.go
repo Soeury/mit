@@ -29,11 +29,13 @@ const (
 	StatusTimeout
 )
 
-// 全局唯一的 ID 作为任务的名称
 var (
-	UniqueTaskID      int64 = 0
-	DefaultReduceID   int64 = -1
-	DefaultReportNull int64 = 1
+	UniqueTaskID        int64         = 0
+	DefaultGetNull      int64         = 1
+	DefaultReportNull   int64         = 1
+	DefaultReduceID     int64         = -1
+	DefaultTimeDuration time.Duration = time.Second * 10
+	DefaultMFileName    string        = ""
 )
 
 type Task struct {
