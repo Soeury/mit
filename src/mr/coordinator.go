@@ -1,11 +1,10 @@
 package mr
 
 import (
-	"log"
+	log "mit/log"
 	"net"
 	"net/http"
 	"net/rpc"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +21,7 @@ const (
 	TaskUnexecuted = iota
 	TaskExecuting
 	TaskFinished
+	TypeExit
 )
 
 const (
@@ -86,14 +86,18 @@ func (c *Coordinator) Report(req *ReportRequest, resp *ReportResponse) error {
 				c.MIsFinished = true
 			}
 
-			// 处理上报的中间数据
-			for _, value := range req.MiddleFileNames {
-				index := strings.LastIndex(value, "-")
-				num, err := strconv.Atoi(value[index+1:])
+			// 处理上报的中间文件
+			// MiddleFiles[0] = ["mr-0-0" , "mr-1-0" , "mr-2-0" ...]
+			// MiddleFiles[1] = ["mr-0-1" , "mr-1-1" , "mr-2-1" ...]
+			// ...
+			// MiddleFiles[9] = ["mr-0-9" , "mr-1-9" , "mr-2-9" ...]
+			for _, name := range req.MiddleFileNames {
+				index := strings.LastIndex(name, "-")
+				num, err := strconv.Atoi(name[index+1:])
 				if err != nil {
-					log.Fatal(err)
+					log.Error(err)
 				}
-				c.MiddleFiles[int64(num)] = append(c.MiddleFiles[int64(num)], value)
+				c.MiddleFiles[int64(num)] = append(c.MiddleFiles[int64(num)], name)
 			}
 
 			delete(c.TaskMap, task.ID)
@@ -109,11 +113,11 @@ func (c *Coordinator) Report(req *ReportRequest, resp *ReportResponse) error {
 			}
 			return nil
 		} else {
-			log.Fatal("task type is not map or reduce")
+			log.Error("task type is not map or reduce")
 		}
 	}
 
-	log.Printf("%s task isn't in task map\n", req.TaskID)
+	log.Errorf("%s task isn't in task map\n", req.TaskID)
 	return nil
 }
 
@@ -123,27 +127,29 @@ func (c *Coordinator) GetTask(req *GetTaskRequest, resp *GetTaskResponse) error 
 	defer c.Mutex.Unlock()
 
 	// 响应数据初始化
-	resp.MFileName = ""
-	resp.RFileData = make([]string, 0)
+	resp.MFileName = DefaultMFileName
+	resp.RFileNames = make([]string, 0)
 	resp.ReduceNum = c.ReduceNum
 	resp.TaskID = strconv.Itoa(int(UniqueTaskID))
 	UniqueTaskID = UniqueTaskID + 1
 
-	if c.MIsFinished {
+	if c.RIsFinished {
+		resp.TaskType = TypeExit
+	} else if c.MIsFinished {
 		// key: ID
 		for RID, status := range c.RRecords {
 			if status == TaskExecuting || status == TaskFinished {
 				continue
 			}
 			c.RRecords[RID] = TaskExecuting
-			resp.RFileData = append(resp.RFileData, c.MiddleFiles[RID]...)
+			resp.RFileNames = append(resp.RFileNames, c.MiddleFiles[RID]...)
 			resp.TaskType = TypeReduce
 
 			task := &Task{
 				ID:        resp.TaskID,
 				Type:      resp.TaskType,
 				Status:    StatusHealthy,
-				MFileName: "",
+				MFileName: resp.MFileName,
 				RFileID:   RID,
 			}
 
@@ -182,13 +188,13 @@ func (c *Coordinator) GetTask(req *GetTaskRequest, resp *GetTaskResponse) error 
 }
 
 func (c *Coordinator) HandleTimeout(TaskID string) {
-	// 给 10s 处理时间
-	time.Sleep(time.Second * 10)
+	// 给指定处理时间
+	time.Sleep(DefaultTimeDuration)
 	c.Mutex.Lock()
 	defer c.Mutex.Unlock()
 
 	// worker 处理完任务后需要 report, 从任务池中移除任务
-	// 10s 后还在执行说明任务超时, 重置任务状态
+	// 指定时间后还在执行说明任务超时, 重置任务状态
 	if task, ok := c.TaskMap[TaskID]; ok {
 		task.Status = StatusTimeout
 
@@ -212,11 +218,10 @@ func (c *Coordinator) HandleTimeout(TaskID string) {
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
-	sockname := coordinatorSock()
-	os.Remove(sockname)
-	listener, err := net.Listen("unix", sockname)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:8090")
 	if err != nil {
-		log.Fatal("listen error:", err)
+		log.Error("listen error:", err)
 	}
 
 	go http.Serve(listener, nil)
