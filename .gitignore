@@ -1,0 +1,7 @@
+####### test datas  #######
+/src/main/pg-*.txt
+
+#######  bashs  #######
+/src/main/test-*.sh
+/Makefile
+/.check-build
