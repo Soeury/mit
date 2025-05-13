@@ -1,8 +1,6 @@
 package raft
 
 import (
-	//	"bytes"
-
 	"bytes"
 	"math/rand"
 	"sort"
@@ -11,11 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	//	"6.824/labgob"
 	"mit/labgob"
 	"mit/labrpc"
 	log "mit/log"
-	mlog "mit/log"
 )
 
 // 当每个 Raft 节点感知到连续的日志条目被提交时，
@@ -36,8 +32,8 @@ type ApplyMsg struct {
 
 	SnapshotValid bool   // 是否启用快照
 	Snapshot      []byte // 快照数据
-	SnapshotTerm  int    //
-	SnapshotIndex int
+	SnapshotTerm  int    // 当前快照最后一个日志任期
+	SnapshotIndex int    // 当前快照最后一个日志索引
 }
 
 type Log struct {
@@ -256,7 +252,7 @@ func (rf *Raft) InstallSnap(req *InstallSnapshotRequest, resp *InstallSnapshotRe
 		resp.Term = rf.term
 		resp.Success = false
 		resp.CommitIndex = rf.commitIndex
-		mlog.Printf("Peer {%d:%d} term is bigger , refuse this snapshot\n", rf.me, rf.term)
+		log.Printf("Peer {%d:%d} term is bigger , refuse this snapshot\n", rf.me, rf.term)
 		return
 	} else {
 		rf.term = req.Term
@@ -389,18 +385,18 @@ func (rf *Raft) SendSnapshotFunc(peer int) {
 		select {
 		case <-time.After(time.Millisecond * 100):
 			rf.mu.Lock()
-			mlog.Printf("Peer {%d:%d} send snapshot timeout\n", rf.me, rf.term)
+			log.Printf("Peer {%d:%d} send snapshot timeout\n", rf.me, rf.term)
 			rf.mu.Unlock()
 		case <-ch:
 			rf.mu.Lock()
-			mlog.Printf("Peer {%d:%d} send snapshot finished\n", rf.me, rf.term)
+			log.Printf("Peer {%d:%d} send snapshot finished\n", rf.me, rf.term)
 			rf.mu.Unlock()
 		}
 
 		if ok {
 			if resp.Success {
 				rf.mu.Lock()
-				mlog.Printf("Peer {%d:%d} append snapshot success\n", rf.me, rf.term)
+				log.Printf("Peer {%d:%d} append snapshot success\n", rf.me, rf.term)
 				rf.matchIndex[peer] = req.LastIncludeIndex
 				rf.nextIndex[peer] = rf.matchIndex[peer] + 1
 				rf.Persist()
