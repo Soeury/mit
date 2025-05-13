@@ -14,6 +14,7 @@ var (
 	infoLog  = log.New(os.Stdout, "\033[34m[infor]\033[0m", log.LstdFlags|log.Lshortfile)
 	debugLog = log.New(os.Stdout, "\033[32m[debug]\033[0m", log.LstdFlags|log.Lshortfile)
 	printLog = log.New(os.Stdout, "\033[35m[print]\033[0m", log.LstdFlags|log.Lshortfile)
+	solidLog = log.New(os.Stdout, "\033[36m[solid]\033[0m", log.LstdFlags|log.Lshortfile)
 
 	loggers = []*log.Logger{errorLog, infoLog, debugLog}
 	mu      sync.Mutex
@@ -26,16 +27,19 @@ var (
 	Infof  = infoLog.Printf
 	Debug  = debugLog.Println
 	Debugf = debugLog.Printf
-	Print  = printLog.Print
+	Print  = printLog.Println
 	Printf = printLog.Printf
+	Solid  = solidLog.Println
+	Solidf = solidLog.Printf
 )
 
 const (
 	InfoLevel  = iota // 0  显示所有日志
-	PrintLevel        // 1 显示 print debug 和 error
-	DebugLevel        // 1  显示 debug 和 error
-	ErrorLevel        // 2  仅显示 error 日志
-	Disabled          // 3  禁用所有日志
+	PrintLevel        // 1  显示 print debug solid 和 error
+	DebugLevel        // 1  显示 debug solid 和 error
+	SolidLevel        // 2  显示 solid 和 error
+	ErrorLevel        // 3  仅显示 error 日志
+	Disabled          // 4  禁用所有日志
 )
 
 func SetLevel(level int) {
@@ -48,6 +52,10 @@ func SetLevel(level int) {
 
 	if ErrorLevel < level {
 		errorLog.SetOutput(io.Discard)
+	}
+
+	if SolidLevel < level {
+		solidLog.SetOutput(io.Discard)
 	}
 
 	if DebugLevel < level {
