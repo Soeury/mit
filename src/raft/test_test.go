@@ -1184,6 +1184,7 @@ func TestSnapshotInstallUnCrash2D(t *testing.T) {
 	snapcommon(t, "Test (2D): install snapshots (unreliable+crash)", false, false, true)
 }
 
+// applierSnap
 // do the servers persist the snapshots, and
 // restart using snapshot along with the
 // tail of the log?
