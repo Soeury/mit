@@ -64,8 +64,9 @@ type Raft struct {
 	commitIndex int // 可以提交的最高日志索引
 	lastApplied int // 已应用的最高日志索引
 
-	lastIncludeIndex int // 快照包含的最高日志索引
-	lastIncludeTerm  int // 快照最高日志的任期
+	snapshot         []byte // 快照数据
+	lastIncludeIndex int    // 快照包含的最高日志索引
+	lastIncludeTerm  int    // 快照最高日志的任期
 
 	nextIndex  []int // leader 下的每个 follower 的下一个待同步的日志索引
 	matchIndex []int // leader 下的每个 follower 和 Leader 一致的日志最大索引
@@ -1024,7 +1025,11 @@ func (rf *Raft) ReadPersist(data []byte) {
 	var oLastIncludeIndex int
 	var oLastIncludeTerm int
 
-	if d.Decode(&oTerm) != nil || d.Decode(&oVotedFor) != nil || d.Decode(&oLog) != nil {
+	if d.Decode(&oTerm) != nil ||
+		d.Decode(&oVotedFor) != nil ||
+		d.Decode(&oLog) != nil ||
+		d.Decode(&oLastIncludeIndex) != nil ||
+		d.Decode(&oLastIncludeTerm) != nil {
 		log.Error("Decode from persist failed...")
 	} else {
 		rf.mu.Lock()
@@ -1039,6 +1044,14 @@ func (rf *Raft) ReadPersist(data []byte) {
 		log.Printf("Peer {%d:%d} read persist data successly!")
 		rf.mu.Unlock()
 	}
+}
+
+// 读取快照数据
+func (rf *Raft) ReadSnapshot(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	rf.snapshot = data
 }
 
 func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg) *Raft {
@@ -1079,6 +1092,7 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 
 	// 从持久化存储中读取崩溃前的状态进行恢复
 	rf.ReadPersist(persister.ReadRaftState())
+	rf.ReadSnapshot(persister.ReadSnapshot())
 
 	// 持有rf实例, goroutine内部只有节点被killed才能return, 否则一直存在
 	go rf.ticker()
